@@ -1,0 +1,71 @@
+diff --git a/py/mkrules.cmake b/py/mkrules.cmake
+index 0903f81..0546894 100644
+--- a/py/mkrules.cmake
++++ b/py/mkrules.cmake
+@@ -151,7 +151,7 @@ add_custom_command(
+ 
+ add_custom_command(
+     OUTPUT ${MICROPY_QSTRDEFS_PREPROCESSED}
+-    COMMAND cat ${MICROPY_QSTRDEFS_PY} ${MICROPY_QSTRDEFS_PORT} ${MICROPY_QSTRDEFS_COLLECTED} | sed "s/^Q(.*)/\"&\"/" | ${CMAKE_C_COMPILER} -E ${MICROPY_CPP_FLAGS} - | sed "s/^\\\"\\(Q(.*)\\)\\\"/\\1/" > ${MICROPY_QSTRDEFS_PREPROCESSED}
++    COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/preprocess_qstrdefs.py ${MICROPY_QSTRDEFS_PREPROCESSED} ${CMAKE_C_COMPILER} ${MICROPY_QSTRDEFS_PY} ${MICROPY_QSTRDEFS_PORT} ${MICROPY_QSTRDEFS_COLLECTED} -- ${MICROPY_CPP_FLAGS}
+     DEPENDS ${MICROPY_QSTRDEFS_PY}
+         ${MICROPY_QSTRDEFS_PORT}
+         ${MICROPY_QSTRDEFS_COLLECTED}
+diff --git a/py/preprocess_qstrdefs.py b/py/preprocess_qstrdefs.py
+new file mode 100644
+index 0000000..dfa712b
+--- /dev/null
++++ b/py/preprocess_qstrdefs.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++"""Preprocess the collected qstrdefs through the C preprocessor.
++
++Portable replacement for the shell pipeline in py/mkrules.cmake:
++
++    cat <inputs> | sed 's/^Q(.*)/"&"/' | $CC -E $CPPFLAGS - | sed 's/^"\(Q(.*)\)"/\1/' > <output>
++
++That pipeline relies on sh-style quoting and fails when ninja runs commands
++through cmd.exe on Windows.
++
++Usage: preprocess_qstrdefs.py <output> <compiler> <input>... -- <cppflags>...
++"""
++
++import subprocess
++import sys
++
++
++def main(argv):
++    if "--" not in argv:
++        sys.exit("usage: preprocess_qstrdefs.py <output> <compiler> <input>... -- <cppflags>...")
++    sep = argv.index("--")
++    output, compiler = argv[0], argv[1]
++    inputs = argv[2:sep]
++    cppflags = argv[sep + 1:]
++
++    lines = []
++    for path in inputs:
++        with open(path, encoding="utf-8") as f:
++            for line in f.read().splitlines():
++                # Quote Q(...) lines so the preprocessor leaves them intact.
++                lines.append('"%s"' % line if line.startswith("Q(") else line)
++    source = ("\n".join(lines) + "\n").encode("utf-8")
++
++    result = subprocess.run(
++        [compiler, "-E"] + cppflags + ["-"],
++        input=source,
++        stdout=subprocess.PIPE,
++        check=True,
++    )
++
++    out_lines = []
++    for line in result.stdout.decode("utf-8", "replace").splitlines():
++        if line.startswith('"Q(') and line.rstrip().endswith(')"'):
++            line = line.rstrip()[1:-1]
++        out_lines.append(line)
++
++    with open(output, "w", encoding="utf-8", newline="\n") as f:
++        f.write("\n".join(out_lines) + "\n")
++
++
++if __name__ == "__main__":
++    main(sys.argv[1:])

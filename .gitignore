@@ -1,0 +1,4 @@
+# MicroPython source tree: cloned by hand, see README
+micropython/
+# CMake build directories
+build-*/
