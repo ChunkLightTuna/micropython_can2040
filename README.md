@@ -71,15 +71,25 @@ pip install mpy-cross==1.29.0.post2 mpremote
 # picotool comes from the Raspberry Pi Pico VS Code extension (%USERPROFILE%\.pico-sdk\picotool)
 git clone --depth 1 --branch v1.29.0 https://github.com/micropython/micropython.git
 cd micropython
-git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb lib/micropython-lib lib/mbedtls lib/lwip
+git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb lib/micropython-lib lib/mbedtls lib/lwip lib/cyw43-driver lib/btstack
 ```
 
 Then:
 
 ```powershell
-.\build.ps1           # -> firmware\firmware-RPI_PICO-can2040.uf2
-.\build.ps1 -Flash    # also reboots the attached Pico into BOOTSEL and copies the uf2
+.\build.ps1                      # -> firmware\firmware-RPI_PICO-can2040.uf2
+.\build.ps1 -Board RPI_PICO_W    # -> firmware\firmware-RPI_PICO_W-can2040.uf2
+.\build.ps1 -Flash               # also reboots the attached Pico into BOOTSEL and copies the uf2
 ```
+
+The Pico W build additionally needs the `lib/cyw43-driver` and `lib/btstack` submodules and
+a prebuilt `pioasm` (the wireless SPI driver ships a `.pio` program). Unpack
+`pico-sdk-tools-<sdk version>-x64-win.zip` from
+https://github.com/raspberrypi/pico-sdk-tools/releases into
+`%USERPROFILE%\.pico-sdk\tools\<sdk version>\`; `build.ps1` picks it up from there.
+
+On the Pico W the wireless driver claims one PIO state machine at boot, so use `pio=1`
+(or try both) when the default block is reported as in use.
 
 The mpy-cross version must match the MicroPython source version (both 1.29.0 here).
 The script converts all paths to 8.3 short names because the pico-sdk build breaks on

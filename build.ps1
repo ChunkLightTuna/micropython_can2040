@@ -76,6 +76,15 @@ $picotool = Get-ChildItem "$env:USERPROFILE\.pico-sdk\picotool\*\picotool\picoto
 if (-not $picotool) { throw "picotool not found under $env:USERPROFILE\.pico-sdk\picotool" }
 $picotoolDir = ShortDir $picotool.DirectoryName
 
+# pioasm is only needed by boards whose SDK libraries carry .pio programs (Pico W: cyw43 SPI).
+# Prebuilt: pico-sdk-tools-<ver>-x64-win.zip from github.com/raspberrypi/pico-sdk-tools,
+# unpacked to %USERPROFILE%\.pico-sdk\tools\<ver>\ (same layout as the Pico VS Code extension).
+$pioasm = Get-ChildItem "$env:USERPROFILE\.pico-sdk\tools\*\pioasm\pioasmConfig.cmake" -ErrorAction SilentlyContinue |
+          Sort-Object FullName -Descending | Select-Object -First 1
+$pioasmArg = @()
+if ($pioasm) { $pioasmArg = @("-Dpioasm_DIR=$(ShortDir $pioasm.DirectoryName)") }
+elseif ($Board -match "_W$") { throw "pioasm not found under $env:USERPROFILE\.pico-sdk\tools (needed for $Board)" }
+
 # MicroPython's cmake rules shell out to `touch`, `cat` and `git`; Git for Windows provides them.
 $gitUsrBin = @("C:\Program Files\Git\usr\bin", "$env:LOCALAPPDATA\Programs\Git\usr\bin") |
              Where-Object { Test-Path "$_\touch.exe" } | Select-Object -First 1
@@ -112,7 +121,8 @@ $ramFlag = if ($NoRam) { "OFF" } else { "ON" }
     "-DCAN2040_IN_RAM=$ramFlag" `
     "-DMICROPY_MPYCROSS=$mpyCross" `
     "-Dpicotool_DIR=$picotoolDir" `
-    "-DPython3_EXECUTABLE=$pythonExe"
+    "-DPython3_EXECUTABLE=$pythonExe" `
+    @pioasmArg
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 
 & $ninjaExe -C $build

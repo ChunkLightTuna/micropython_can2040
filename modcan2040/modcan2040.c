@@ -139,9 +139,11 @@ static void can2040_mp_stop_hw(can2040_mp_obj_t *self) {
     if (!self->running) {
         return;
     }
+    // can2040_stop() is not IRQ-safe: it must not be preempted by
+    // can2040_pio_irq_handler(), so silence the PIO IRQ first.
+    irq_set_enabled(self->irq_num, false);
     can2040_stop(&self->cbus);
 
-    irq_set_enabled(self->irq_num, false);
     irq_remove_handler(self->irq_num, can2040_mp_irq_handlers[self->pio_num]);
     if (self->prev_handler != NULL) {
         irq_set_exclusive_handler(self->irq_num, self->prev_handler);

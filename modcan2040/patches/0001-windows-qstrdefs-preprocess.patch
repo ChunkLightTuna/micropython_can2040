@@ -1,8 +1,59 @@
+diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
+index e1046fa..4caf0a0 100644
+--- a/py/makeqstrdefs.py
++++ b/py/makeqstrdefs.py
+@@ -101,6 +101,12 @@ def preprocess():
+             (args.cxxflags, cxxsources),
+         ):
+             batch_size = (len(sources) + cpus - 1) // cpus
++            if os.name == "nt":
++                # Windows limits a command line to 32 KiB; large ports (e.g. Pico W with
++                # lwIP and btstack) exceed it with cpus-sized batches.
++                fixed = sum(len(a) + 3 for a in args.pp + flags)
++                per_file = max(len(s) + 3 for s in sources) if sources else 1
++                batch_size = max(1, min(batch_size, (30000 - fixed) // per_file))
+             chunks = [sources[i : i + batch_size] for i in range(0, len(sources), batch_size or 1)]
+             for output in p.imap(pp(flags), chunks):
+                 out_file.write(output)
+@@ -224,6 +230,17 @@ if __name__ == "__main__":
+             else:
+                 named_args[current_tok].append(arg)
+ 
++        # Expand @file response files in the sources list. mkrules.cmake uses one to
++        # keep the command line under the Windows 32 KiB limit.
++        expanded = []
++        for src in named_args["sources"]:
++            if src.startswith("@"):
++                with io.open(src[1:], encoding="utf-8") as f:
++                    expanded.extend(line.strip() for line in f if line.strip())
++            else:
++                expanded.append(src)
++        named_args["sources"] = expanded
++
+         if not named_args["pp"] or len(named_args["output"]) != 1:
+             print("usage: %s %s ..." % (sys.argv[0], " ... ".join(named_args)))
+             sys.exit(2)
 diff --git a/py/mkrules.cmake b/py/mkrules.cmake
-index 0903f81..0546894 100644
+index 0903f81..6371c68 100644
 --- a/py/mkrules.cmake
 +++ b/py/mkrules.cmake
-@@ -151,7 +151,7 @@ add_custom_command(
+@@ -122,9 +122,14 @@ add_custom_target(
+ # If any of the dependencies in this rule change then the C-preprocessor step must be run.
+ # It only needs to be passed the list of MICROPY_SOURCE_QSTR files that have changed since
+ # it was last run, but it looks like it's not possible to specify that with cmake.
++# The source list is passed through a response file: with it inline, large ports
++# exceed the 32 KiB command-line limit on Windows.
++set(MICROPY_QSTR_SOURCES_FILE ${MICROPY_GENHDR_DIR}/qstr_sources.txt)
++list(JOIN MICROPY_SOURCE_QSTR "\n" _micropy_qstr_sources_text)
++file(WRITE ${MICROPY_QSTR_SOURCES_FILE} "${_micropy_qstr_sources_text}\n")
+ add_custom_command(
+     OUTPUT ${MICROPY_QSTRDEFS_LAST}
+-    COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/makeqstrdefs.py pp ${CMAKE_C_COMPILER} -E output ${MICROPY_GENHDR_DIR}/qstr.i.last cflags ${MICROPY_CPP_FLAGS} -DNO_QSTR cxxflags ${MICROPY_CPP_FLAGS} -DNO_QSTR sources ${MICROPY_SOURCE_QSTR}
++    COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/makeqstrdefs.py pp ${CMAKE_C_COMPILER} -E output ${MICROPY_GENHDR_DIR}/qstr.i.last cflags ${MICROPY_CPP_FLAGS} -DNO_QSTR cxxflags ${MICROPY_CPP_FLAGS} -DNO_QSTR sources @${MICROPY_QSTR_SOURCES_FILE}
+     DEPENDS ${MICROPY_MPVERSION}
+         ${MICROPY_SOURCE_QSTR}
+     VERBATIM
+@@ -151,7 +156,7 @@ add_custom_command(
  
  add_custom_command(
      OUTPUT ${MICROPY_QSTRDEFS_PREPROCESSED}
