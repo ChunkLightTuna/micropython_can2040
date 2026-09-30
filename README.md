@@ -11,9 +11,9 @@ micropython_can2040/
 │   ├── modcan2040.c
 │   ├── micropython.cmake
 │   ├── can2040_mp_hooks.h
-│   └── patches/   Windows build fix applied to the MicroPython tree by build.ps1
+│   └── patches/   Windows build fixes applied to the MicroPython tree by build.py
 ├── micropython/   MicroPython v1.29.0 source (not committed; cloned by hand, see below)
-├── build.ps1      Windows build + flash script
+├── build.py       build + flash script (Windows, macOS, Linux)
 └── firmware/      built .uf2 files
 ```
 
@@ -59,16 +59,23 @@ Notes:
   retry forever and `stats()['tx_attempts']` will climb.
 - Soft reset (Ctrl-D) stops CAN and releases the hardware automatically.
 - The can2040 core is linked into RAM (`CAN2040_IN_RAM=ON`, ~10 KB) so flash cache misses cannot
-  disturb its interrupt timing. Pass `-NoRam` to the build script to keep it in flash.
+  disturb its interrupt timing. Pass `--no-ram` to the build script to keep it in flash.
 
-## Building (Windows)
+## Building
 
-One-time setup:
+One-time setup. Tools: `arm-none-eabi-gcc`, CMake, Ninja, Python 3 with `mpy-cross` and
+`mpremote`, and prebuilt `picotool` and `pioasm` from
+https://github.com/raspberrypi/pico-sdk-tools/releases (the Pico VS Code extension installs
+the same files).
 
-```powershell
-winget install Arm.GnuArmEmbeddedToolchain Kitware.CMake Ninja-build.Ninja
+```sh
+# Windows: winget install Arm.GnuArmEmbeddedToolchain Kitware.CMake Ninja-build.Ninja
+# Debian/Ubuntu: apt install gcc-arm-none-eabi cmake ninja-build
+# macOS: brew install --cask gcc-arm-embedded; brew install cmake ninja
 pip install mpy-cross==1.29.0.post2 mpremote
-# picotool comes from the Raspberry Pi Pico VS Code extension (%USERPROFILE%\.pico-sdk\picotool)
+# unpack pico-sdk-tools-<sdk version>-<os>.zip so that these exist:
+#   ~/.pico-sdk/picotool/<ver>/picotool/picotoolConfig.cmake
+#   ~/.pico-sdk/tools/<ver>/pioasm/pioasmConfig.cmake        (Pico W builds only)
 git clone --depth 1 --branch v1.29.0 https://github.com/micropython/micropython.git
 cd micropython
 git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb lib/micropython-lib lib/mbedtls lib/lwip lib/cyw43-driver lib/btstack
@@ -76,35 +83,29 @@ git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb lib/micropython-l
 
 Then:
 
-```powershell
-.\build.ps1                      # -> firmware\firmware-RPI_PICO-can2040.uf2
-.\build.ps1 -Board RPI_PICO_W    # -> firmware\firmware-RPI_PICO_W-can2040.uf2
-.\build.ps1 -Flash               # also reboots the attached Pico into BOOTSEL and copies the uf2
-```
-
-The Pico W build additionally needs the `lib/cyw43-driver` and `lib/btstack` submodules and
-a prebuilt `pioasm` (the wireless SPI driver ships a `.pio` program). Unpack
-`pico-sdk-tools-<sdk version>-x64-win.zip` from
-https://github.com/raspberrypi/pico-sdk-tools/releases into
-`%USERPROFILE%\.pico-sdk\tools\<sdk version>\`; `build.ps1` picks it up from there.
-
-On the Pico W the wireless driver claims one PIO state machine at boot, so use `pio=1`
-(or try both) when the default block is reported as in use.
-
-The mpy-cross version must match the MicroPython source version (both 1.29.0 here).
-The script converts all paths to 8.3 short names because the pico-sdk build breaks on
-paths with spaces, puts Git's `usr\bin` on the PATH for `touch`/`cat`, and applies
-`modcan2040\patches\*.patch` to the MicroPython tree (one patch replaces a `sed` pipeline in
-`py/mkrules.cmake` that cmd.exe cannot run). Nothing else in the MicroPython tree is modified.
-
-On Linux/macOS the equivalent is:
-
 ```sh
-cd micropython/ports/rp2
-cmake -S . -B build -G Ninja -DMICROPY_BOARD=RPI_PICO \
-      -DUSER_C_MODULES=/abs/path/to/modcan2040/micropython.cmake
-ninja -C build
+python build.py                       # -> firmware/firmware-RPI_PICO-can2040.uf2
+python build.py --board RPI_PICO_W    # -> firmware/firmware-RPI_PICO_W-can2040.uf2
+python build.py --flash               # also reboots the attached Pico into BOOTSEL and copies the uf2
+python build.py --clean               # wipe the build directory first; --no-ram keeps can2040 in flash
 ```
+
+The script finds the tools on PATH or in their usual install locations, applies
+`modcan2040/patches/*.patch` to the MicroPython tree (idempotently), configures with CMake
+and builds with Ninja. The mpy-cross version must match the MicroPython source version
+(both 1.29.0 here).
+
+On Windows it also converts every path to its 8.3 short form, because the pico-sdk build
+breaks on paths with spaces, and puts Git for Windows' `usr\bin` on the PATH for the
+`touch`/`cat` that MicroPython's cmake rules call. The patch replaces a `sed` pipeline in
+`py/mkrules.cmake` that cmd.exe cannot run and routes the qstr preprocessing source list
+through a response file to stay under the 32 KiB command-line limit. Nothing else in the
+MicroPython tree is modified, and the patch is harmless on other platforms.
+
+The Pico W build needs the `lib/cyw43-driver` and `lib/btstack` submodules and the prebuilt
+`pioasm` (the wireless SPI driver ships a `.pio` program). On the Pico W the wireless driver
+claims one PIO state machine at boot, so use `pio=1` (or try both) when the default block is
+reported as in use.
 
 ## Flashing by hand
 
