@@ -2,3 +2,4 @@
 micropython/
 # CMake build directories
 build-*/
+__pycache__/
